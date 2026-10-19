@@ -43,7 +43,8 @@ What the workflow does in the calling repository:
    `max-runs`, so history survives without external storage;
 3. renders the dashboard, writes the Markdown summary to the **job summary**, uploads the
    site as an artifact, and optionally deploys it to the caller's GitHub Pages
-   (`publish-pages: true`);
+   (`publish-pages: true`, which additionally needs `pages: write` and `id-token: write`
+   on the calling job);
 4. optionally **gates** the build on a flakiness budget and a minimum pass rate.
 
 | Input              | Default               | Meaning                                                    |

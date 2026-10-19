@@ -48,10 +48,8 @@ on:
         description: Number of tests judged flaky in the window
         value: ${{ jobs.radar.outputs.flaky-count }}
 
-permissions:
-  contents: write
-  actions: read
-
+# Permissions are inherited from the caller. Grant `contents: write` (history branch) and
+# `actions: read` (artifacts); add `pages: write` + `id-token: write` when publish-pages is true.
 jobs:
   radar:
     name: Analyse ${{ inputs.max-runs }} runs
@@ -59,11 +57,6 @@ jobs:
     timeout-minutes: 15
     outputs:
       flaky-count: ${{ steps.analyse.outputs.flaky }}
-    permissions:
-      contents: write
-      actions: read
-      pages: write
-      id-token: write
     steps:
       - name: Check out flaky-test-radar
         uses: actions/checkout@v7
