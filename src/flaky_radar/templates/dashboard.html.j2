@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flaky Test Radar</title>
+<style>
+  :root { --bg:#0f172a; --card:#111c33; --fg:#e2e8f0; --muted:#94a3b8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --line:#1e293b; --accent:#38bdf8; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f8fafc; --card:#ffffff; --fg:#0f172a; --muted:#475569; --line:#e2e8f0; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:24px 32px 8px; display:flex; flex-wrap:wrap; gap:16px; align-items:baseline; }
+  h1 { margin:0; font-size:22px; } h2 { font-size:16px; margin:0 0 12px; }
+  .meta { color:var(--muted); }
+  main { padding:16px 32px 48px; display:grid; gap:20px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .span2 { grid-column:1 / -1; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .tile b { display:block; font-size:26px; } .tile span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--card); }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .flaky { background:color-mix(in srgb,var(--bad) 20%,transparent); color:var(--bad); }
+  .suspicious { background:color-mix(in srgb,var(--warn) 20%,transparent); color:var(--warn); }
+  .always-failing { background:color-mix(in srgb,var(--muted) 25%,transparent); color:var(--fg); }
+  .stable { background:color-mix(in srgb,var(--ok) 20%,transparent); color:var(--ok); }
+  .spark { display:inline-flex; gap:2px; } .spark i { width:7px; height:14px; border-radius:2px; display:inline-block; }
+  .spark .p { background:var(--ok); } .spark .f { background:var(--bad); } .spark .s { background:var(--muted); opacity:.5; } .spark .b { background:var(--warn); }
+  svg text { fill:var(--muted); font-size:10px; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--accent); }
+  .msg { color:var(--muted); font-size:12px; max-width:48ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  footer { padding:0 32px 32px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Flaky Test Radar</h1>
+  <span class="meta">{{ analysis.runs|length }} runs · {{ analysis.tests|length }} tests · generated {{ generated_at }}{% if source %} · source <code>{{ source }}</code>{% endif %}</span>
+</header>
+<main>
+  <section class="card span2">
+    <div class="tiles">
+      <div class="tile"><b style="color:var(--bad)">{{ analysis.flaky|length }}</b><span>flaky</span></div>
+      <div class="tile"><b style="color:var(--warn)">{{ analysis.suspicious|length }}</b><span>suspicious</span></div>
+      <div class="tile"><b>{{ analysis.always_failing|length }}</b><span>always failing</span></div>
+      <div class="tile"><b style="color:var(--ok)">{{ '%.1f'|format(latest.pass_rate*100) if latest else '–' }}%</b><span>pass rate, latest run</span></div>
+      <div class="tile"><b>{{ latest.retry_passes if latest else '–' }}</b><span>retry passes, latest run</span></div>
+    </div>
+  </section>
+
+  <section class="card span2">
+    <h2>Pass rate and retry passes per run</h2>
+    {% set W = 900 %}{% set H = 160 %}{% set n = analysis.runs|length %}
+    <svg viewBox="0 0 {{ W }} {{ H + 30 }}" width="100%" preserveAspectRatio="none" role="img" aria-label="pass rate trend">
+      <line x1="40" y1="{{ H }}" x2="{{ W }}" y2="{{ H }}" stroke="var(--line)"/>
+      <text x="0" y="12">100%</text><text x="0" y="{{ H }}">0%</text>
+      {% for r in analysis.runs %}
+        {% set x = 40 + loop.index0 * ((W-40) / (n if n > 1 else 1)) %}
+        {% set bw = ((W-40) / (n if n > 1 else 1)) * 0.6 %}
+        {% set fh = r.pass_rate * (H-10) %}
+        <rect x="{{ x }}" y="{{ H - fh }}" width="{{ bw }}" height="{{ fh }}" fill="var(--ok)" opacity="0.75"><title>{{ r.run_id }} · {{ '%.1f'|format(r.pass_rate*100) }}% · {{ r.failed + r.broken }} failed · {{ r.retry_passes }} retry passes</title></rect>
+        {% if r.retry_passes %}<rect x="{{ x }}" y="{{ H - fh - 6 }}" width="{{ bw }}" height="4" fill="var(--warn)"/>{% endif %}
+        {% if n <= 24 or loop.index0 % (n // 12 + 1) == 0 %}<text x="{{ x }}" y="{{ H + 22 }}">{{ r.run_at[:10] }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+  </section>
+
+  <section class="card span2">
+    <h2>Ranked by flakiness score</h2>
+    <table>
+      <thead><tr><th>test</th><th>verdict</th><th class="num">score</th><th class="num">fail rate</th><th class="num">flips</th><th class="num">retry passes</th><th>history (oldest → newest)</th><th class="num">p95 s</th><th>last failure</th></tr></thead>
+      <tbody>
+      {% for t in analysis.tests[:max_rows] %}
+        <tr>
+          <td><code>{{ t.test_id }}</code></td>
+          <td><span class="badge {{ t.verdict }}">{{ t.verdict }}</span></td>
+          <td class="num">{{ '%.2f'|format(t.score) }}</td>
+          <td class="num">{{ '%.0f'|format(t.fail_rate*100) }}%</td>
+          <td class="num">{{ t.flips }}</td>
+          <td class="num">{{ t.retry_passes }}</td>
+          <td><span class="spark">{% for run_id, s in t.outcomes[-30:] %}<i class="{{ s[0] }}" title="{{ run_id }}: {{ s }}"></i>{% endfor %}</span></td>
+          <td class="num">{{ '%.1f'|format(t.p95_duration) }}</td>
+          <td class="msg" title="{{ t.last_message|e }}">{{ t.last_message|e }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Slowest tests (p95)</h2>
+    <table><thead><tr><th>test</th><th class="num">p95 s</th></tr></thead><tbody>
+    {% for t in analysis.slowest %}<tr><td><code>{{ t.test_id }}</code></td><td class="num">{{ '%.1f'|format(t.p95_duration) }}</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Runs</h2>
+    <table><thead><tr><th>run</th><th class="num">total</th><th class="num">failed</th><th class="num">retry passes</th><th class="num">pass rate</th></tr></thead><tbody>
+    {% for r in analysis.runs|reverse %}<tr><td><code>{{ r.run_id }}</code></td><td class="num">{{ r.total }}</td><td class="num">{{ r.failed + r.broken }}</td><td class="num">{{ r.retry_passes }}</td><td class="num">{{ '%.1f'|format(r.pass_rate*100) }}%</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+</main>
+<footer>Score = 0.5·flip rate + 0.3·intermittency + 0.6·retry-pass ratio, capped at 1; flaky ≥ 0.4. "Always failing" is a broken test or product, not a flaky one. Built with <a href="https://github.com/yassineaitt/flaky-test-radar">flaky-test-radar</a>.</footer>
+</body>
+</html>
