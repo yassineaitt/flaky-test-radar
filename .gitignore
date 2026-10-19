@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+site/
+reports/
+.env
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
