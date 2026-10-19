@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Ruff · mypy (strict) · pytest (≥85 % coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check . && uv run ruff format --check . && uv run mypy
+      - run: uv run pytest --cov --cov-report=term
+      - name: Samples are reproducible
+        run: uv run python scripts/make_samples.py && git diff --exit-code -- samples
+
+  # Produce artifacts the way a real test job would, then exercise the reusable workflow on them.
+  sample-tests:
+    name: Emit sample JUnit artifacts
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pick the newest sample run as "this run's" results
+        run: |
+          latest=$(ls -1d samples/results/*/ | sort | tail -1)
+          mkdir -p out && cp "$latest"/*.xml out/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: junit-sample
+          path: out
+
+  radar-self-test:
+    name: Reusable workflow self-test
+    needs: sample-tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+      actions: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/radar.yml
+    with:
+      artifact-pattern: junit-*
+      history-branch: flaky-radar-history
+      max-runs: 30
+      radar-ref: ${{ github.sha }}
+      max-flaky: 50
+
+  pages:
+    name: Publish sample dashboard
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - run: uv run flaky-radar render samples/results --out site --source "samples (12 synthetic runs)"
+      - id: pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" --silent 2>/dev/null; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::Pages not enabled; skipping publish"; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sample-dashboard
+          path: site
+      - uses: actions/configure-pages@v6
+        if: steps.pages.outputs.enabled == 'true'
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.pages.outputs.enabled == 'true'
+        with:
+          path: site
+      - id: deployment
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@v5
