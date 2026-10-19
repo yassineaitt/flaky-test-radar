@@ -1,0 +1,171 @@
+name: Flaky Test Radar
+
+# Reusable workflow. Call it from any repository after your test jobs:
+#
+#   flaky-radar:
+#     needs: [tests]
+#     if: always()
+#     permissions: { contents: write, actions: read }
+#     uses: yassineaitt/flaky-test-radar/.github/workflows/radar.yml@main
+#     with: { artifact-pattern: 'junit-*' }
+#
+# It downloads the caller run's JUnit/Allure artifacts, appends them to a history branch,
+# renders the dashboard, writes a Markdown summary to the job summary and uploads the site.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-pattern:
+        description: Glob of artifacts in the calling run that contain JUnit XML / Allure results
+        type: string
+        default: 'junit-*'
+      history-branch:
+        description: Orphan branch in the calling repository that stores past results
+        type: string
+        default: flaky-radar-history
+      max-runs:
+        description: How many runs to keep and analyse
+        type: number
+        default: 50
+      max-flaky:
+        description: Fail the job when more tests than this are flaky (-1 disables the gate)
+        type: number
+        default: -1
+      min-pass-rate:
+        description: Fail the job when the latest run's pass rate is below this (0-1)
+        type: number
+        default: 0
+      radar-ref:
+        description: Git ref of flaky-test-radar to run
+        type: string
+        default: main
+      publish-pages:
+        description: Deploy the dashboard to the calling repository's GitHub Pages
+        type: boolean
+        default: false
+    outputs:
+      flaky-count:
+        description: Number of tests judged flaky in the window
+        value: ${{ jobs.radar.outputs.flaky-count }}
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  radar:
+    name: Analyse ${{ inputs.max-runs }} runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      flaky-count: ${{ steps.analyse.outputs.flaky }}
+    permissions:
+      contents: write
+      actions: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Check out flaky-test-radar
+        uses: actions/checkout@v7
+        with:
+          repository: yassineaitt/flaky-test-radar
+          ref: ${{ inputs.radar-ref }}
+          path: .radar
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: .radar/uv.lock
+      - name: Install radar
+        run: uv sync --locked --no-dev --project .radar
+
+      - name: Download this run's result artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ inputs.artifact-pattern }}
+          path: incoming
+          merge-multiple: false
+
+      - name: Fetch history branch (or start one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.history-branch }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git clone --quiet --depth 1 --branch "$BRANCH" "$url" history 2>/dev/null; then
+            echo "history branch found"
+          else
+            mkdir history && cd history && git init -q -b "$BRANCH" && git remote add origin "$url"
+            echo "# flaky-test-radar history" > README.md
+            echo "Machine-managed by the Flaky Test Radar workflow. One directory per run under results/." >> README.md
+          fi
+
+      - name: Append this run and prune the window
+        env:
+          MAX_RUNS: ${{ inputs.max-runs }}
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y-%m-%dT%H-%M)
+          dest="history/results/${stamp}_run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$dest"
+          count=$(find incoming -type f \( -name '*.xml' -o -name '*-result.json' \) | wc -l | tr -d ' ')
+          if [ "$count" = "0" ]; then
+            echo "::warning::no JUnit/Allure files matched artifact pattern '${{ inputs.artifact-pattern }}'"
+          fi
+          find incoming -type f \( -name '*.xml' -o -name '*-result.json' \) | while read -r f; do
+            rel=$(echo "$f" | sed 's#^incoming/##; s#/#__#g')
+            cp "$f" "$dest/$rel"
+          done
+          # keep only the newest MAX_RUNS directories
+          ls -1d history/results/*/ 2>/dev/null | sort | head -n -"$MAX_RUNS" | xargs -r rm -rf
+          echo "runs kept: $(ls -1d history/results/*/ | wc -l | tr -d ' ')"
+
+      - name: Push history
+        env:
+          BRANCH: ${{ inputs.history-branch }}
+        run: |
+          set -euo pipefail
+          cd history
+          git config user.name "flaky-test-radar[bot]"
+          git config user.email "flaky-test-radar@users.noreply.github.com"
+          git add -A
+          git commit -q -m "chore(radar): record run ${GITHUB_RUN_ID} attempt ${GITHUB_RUN_ATTEMPT}" || echo "nothing to commit"
+          git push -q origin "HEAD:${BRANCH}"
+
+      - name: Render dashboard
+        id: analyse
+        env:
+          MAX_RUNS: ${{ inputs.max-runs }}
+        run: |
+          set -euo pipefail
+          uv run --project .radar flaky-radar render history/results --out site \
+            --source "${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}" --max-runs "$MAX_RUNS"
+          cat site/summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "flaky=$(uv run --project .radar python -c 'import json;print(sum(1 for t in json.load(open("site/radar.json"))["tests"] if t["verdict"]=="flaky"))')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flaky-radar-dashboard
+          path: site
+          retention-days: 30
+
+      - name: Gate on flakiness budget
+        if: inputs.max-flaky >= 0 || inputs.min-pass-rate > 0
+        env:
+          MAX_FLAKY: ${{ inputs.max-flaky }}
+          MIN_PASS: ${{ inputs.min-pass-rate }}
+          MAX_RUNS: ${{ inputs.max-runs }}
+        run: |
+          [ "$MAX_FLAKY" -lt 0 ] && MAX_FLAKY=1000000
+          uv run --project .radar flaky-radar gate history/results --max-runs "$MAX_RUNS" \
+            --max-flaky "$MAX_FLAKY" --min-pass-rate "$MIN_PASS" > /dev/null
+
+      - uses: actions/configure-pages@v6
+        if: inputs.publish-pages
+      - uses: actions/upload-pages-artifact@v5
+        if: inputs.publish-pages
+        with:
+          path: site
+      - uses: actions/deploy-pages@v5
+        if: inputs.publish-pages
