@@ -120,7 +120,9 @@ def parse_allure_result(path: Path, *, run_id: str, run_at: datetime) -> list[Te
     labels = {lbl.get("name"): lbl.get("value") for lbl in data.get("labels", [])}
     suite = labels.get("suite") or labels.get("parentSuite") or labels.get("feature") or ""
     start, stop = data.get("start"), data.get("stop")
-    duration = max(0.0, (stop - start) / 1000) if isinstance(start, int) and isinstance(stop, int) else 0.0
+    duration = 0.0
+    if isinstance(start, int) and isinstance(stop, int):
+        duration = max(0.0, (stop - start) / 1000)
     details = data.get("statusDetails") or {}
     return [
         TestResult(
@@ -137,7 +139,11 @@ def parse_allure_result(path: Path, *, run_id: str, run_at: datetime) -> list[Te
 
 
 def _msg(node: ET.Element) -> str:
-    return (node.get("message") or (node.text or "").strip().splitlines()[0:1] or [""])[0][:500]
+    text = node.get("message") or ""
+    if not text:
+        lines = (node.text or "").strip().splitlines()
+        text = lines[0] if lines else ""
+    return text[:500]
 
 
 def _float(value: str | None) -> float:

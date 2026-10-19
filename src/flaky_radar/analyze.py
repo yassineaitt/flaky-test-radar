@@ -13,6 +13,7 @@ The score blends them into a single 0-1 number used only for ranking.
 
 from __future__ import annotations
 
+import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -45,7 +46,7 @@ class TestHistory:
     @property
     def flips(self) -> int:
         seq = [s in ("failed", "broken") for _, s in self.outcomes if s != "skipped"]
-        return sum(1 for a, b in zip(seq, seq[1:], strict=False) if a != b)
+        return sum(1 for a, b in itertools.pairwise(seq) if a != b)
 
     @property
     def flip_rate(self) -> float:
@@ -57,20 +58,20 @@ class TestHistory:
         if not self.durations:
             return 0.0
         xs = sorted(self.durations)
-        return xs[min(len(xs) - 1, int(round(0.95 * (len(xs) - 1))))]
+        return xs[min(len(xs) - 1, round(0.95 * (len(xs) - 1)))]
 
     @property
     def score(self) -> float:
-        """0 = stable, 1 = coin flip. Retry passes dominate; a test that always fails is not flaky."""
+        """0 = stable, 1 = coin flip. Retry passes dominate; always-failing is not flaky."""
         if self.fail_rate in (0.0, 1.0) and self.retry_passes == 0:
             return 0.0
         intermittency = 1.0 - abs(0.5 - self.fail_rate) * 2  # peaks at 50 % failures
         retry = min(1.0, self.retry_passes / max(1, self.runs))
-        return round(min(1.0, 0.5 * self.flip_rate + 0.3 * intermittency + 0.4 * retry), 3)
+        return round(min(1.0, 0.5 * self.flip_rate + 0.3 * intermittency + 0.6 * retry), 3)
 
     @property
     def verdict(self) -> str:
-        if self.score >= 0.5:
+        if self.score >= 0.4:
             return "flaky"
         if self.score > 0:
             return "suspicious"
@@ -140,8 +141,9 @@ def analyze(runs: list[Run], *, max_runs: int | None = None) -> Analysis:
             status, retried = final_status(attempts)
             counts[status] += 1
             retry_passes += int(retried)
+            first = attempts[0]
             h = histories.setdefault(
-                test_id, TestHistory(test_id=test_id, suite=attempts[0].suite, name=attempts[0].name)
+                test_id, TestHistory(test_id=test_id, suite=first.suite, name=first.name)
             )
             h.outcomes.append((run.run_id, status))
             h.retry_passes += int(retried)
