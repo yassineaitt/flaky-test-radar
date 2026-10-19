@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="junit-shard-2" tests="6">
+    <testcase classname="tests.api.booking" name="create" time="1.990"></testcase>
+    <testcase classname="tests.api.booking" name="get_by_id" time="2.108"></testcase>
+    <testcase classname="tests.api.booking" name="update_put" time="1.183"></testcase>
+    <testcase classname="tests.api.booking" name="patch" time="2.309"></testcase>
+    <testcase classname="tests.api.booking" name="delete" time="1.879"></testcase>
+    <testcase classname="tests.api.booking" name="list_filter" time="1.398"><failure message="AssertionError: expected 200, got 500">AssertionError: expected 200, got 500
+  at tests.api.booking.list_filter</failure></testcase>
+  </testsuite>
+</testsuites>

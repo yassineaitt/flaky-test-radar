@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="junit-shard-1" tests="9">
+    <testcase classname="tests.ui.todo" name="creates_a_todo" time="0.545"></testcase>
+    <testcase classname="tests.ui.todo" name="marks_completed" time="0.839"></testcase>
+    <testcase classname="tests.ui.todo" name="deletes_a_todo" time="0.525"></testcase>
+    <testcase classname="tests.ui.todo" name="filters_active" time="1.500"></testcase>
+    <testcase classname="tests.ui.todo" name="persists_after_reload" time="0.370"><failure message="Expected 3 items, received 0">Expected 3 items, received 0
+  at tests.ui.todo.persists_after_reload</failure></testcase>
+    <testcase classname="tests.ui.checkout" name="applies_coupon" time="0.651"></testcase>
+    <testcase classname="tests.ui.checkout" name="pays_with_card" time="2.734"><failure message="TimeoutError: waiting for locator('#pay')">TimeoutError: waiting for locator('#pay')
+  at tests.ui.checkout.pays_with_card</failure></testcase>
+    <testcase classname="tests.ui.checkout" name="pays_with_card" time="0.911"></testcase>
+    <testcase classname="tests.ui.checkout" name="shows_order_summary" time="12.581"></testcase>
+  </testsuite>
+</testsuites>
